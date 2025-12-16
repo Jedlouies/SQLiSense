@@ -1,8 +1,14 @@
 import re
 from urllib.parse import urlparse, urljoin, parse_qs
 from bs4 import BeautifulSoup
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, TypedDict
 from .http_request_engine import HttpRequestEngine
+
+class Form(TypedDict):
+    url: str
+    method: str
+    inputs: Dict[str, str]
+    origin_url: str
 
 class Crawler:
     """
@@ -21,6 +27,8 @@ class Crawler:
         self.engine = engine
         self.max_depth = max_depth
         self.visited_urls: Set[str] = set()
+        self.discovered_forms = []
+
         
     def _get_absolute_url(self, base: str, link: str) -> str | None:
         """
@@ -29,7 +37,7 @@ class Crawler:
         
         link = link.strip()
         
-        if link.startwith('#') or link.lower().startswith('javascript:'):
+        if link.startswith('#') or link.lower().startswith('javascript:'):
             return None
         
         absolute_url = urljoin(base, link)
@@ -42,8 +50,17 @@ class Crawler:
         if parsed_link.netloc != parsed_base.netloc:
             return None
         
-        normalized_url = parsed_link.scheme + "://" + parsed_link.netloc + parsed_link.path
-        return normalized_url.strip('/')
+        normalized_url = (
+            parsed_link.scheme + "://" + parsed_link.netloc + parsed_link.path
+        )
+
+        if parsed_link.query:
+            normalized_url += "?" + parsed_link.query
+
+        if parsed_link.fragment:
+            normalized_url += "#" + parsed_link.fragment
+
+        return normalized_url.strip('/') if parsed_link.path != '/' else normalized_url
     
     def _extract_links(self, soup: BeautifulSoup, current_url: str) -> Set[str]:
         """
@@ -59,14 +76,14 @@ class Crawler:
             if abs_url and abs_url not in self.visited_urls:
                 new_links.add(abs_url)
                 
-            for script in soup.find_all('script'):
-                js_url = re.findall(r'\"(http[s]?://[^\s\"\']*)\"', script.string or '')
-                for url in js_url:
-                    abs_url = self._get_absolute_url(current_url, url)
-                    if abs_url and abs_url not in self.visited_urls:
-                        new_links.add(abs_url)
+        for script in soup.find_all('script'):
+            js_url = re.findall(r'\"(http[s]?://[^\s\"\']*)\"', script.string or '')
+            for url in js_url:
+                abs_url = self._get_absolute_url(current_url, url)
+                if abs_url and abs_url not in self.visited_urls:
+                    new_links.add(abs_url)
             
-            return new_links
+        return new_links
     
     def _extract_forms(self, soup: BeautifulSoup, current_url: str):
         """
@@ -81,7 +98,7 @@ class Crawler:
             if not target_url:
                 continue
             
-            inputs: input = {}
+            inputs: Dict[str, str] = {}
             for input_tag in form_tag.find_all(['input', 'textarea', 'select']):
                 input_name = input_tag.get('name')
                 input_type = input_tag.get('type', 'text')
@@ -113,8 +130,35 @@ class Crawler:
         print(f"Crawling URL: {url} at depth {depth}")
         self.visited_urls.add(url)
         
+        rendered_html = self.engine.get(url) 
+        
+        if rendered_html is None:
+            return
+        
+        soup = BeautifulSoup(rendered_html, 'html.parser')
+        
+        self._extract_forms(soup, url)
+        
+        new_links = self._extract_links(soup, url)
+        
+        for link in new_links:
+            self.crawl(link, depth + 1)
+        
+        print(f"Completed crawling URL: {url} at depth {depth}")        
+        """
+        Recursively crawls the website starting from the given URL up to the specified depth.
+        """
+        
+        if depth > self.max_depth:
+            return
+        if url in self.visited_urls:
+            return
+        
+        print(f"Crawling URL: {url} at depth {depth}")
+        self.visited_urls.add(url)
+        
         response = self.engine.get(url)
-        if response is None or 'rext/html' not in response.headers.get('Content-Type', ''):
+        if response is None or 'text/html' not in response.headers.get('Content-Type', ''):
             return
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -129,6 +173,16 @@ class Crawler:
         print(f"Completed crawling URL: {url} at depth {depth}")
     
     def start_scan(self):
+        """
+        Initializes and runs the crawl process
+        """
+        
+        self.crawl(self.base_url, depth=0)
+        
+        if hasattr(self.engine, 'close'):
+            self.engine.close()
+            
+        return self.discovered_forms
         """
         Initializes and runs the crawl process
         """
