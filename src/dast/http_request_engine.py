@@ -20,8 +20,7 @@ def _close_playwright_globals():
     if _browser:
         _browser.close()
     if _playwright_context:
-        _playwright_context.__exit__(None, None, None)
-
+        _playwright_context.stop()
 
 class HttpRequestEngine:
     """
@@ -33,7 +32,6 @@ class HttpRequestEngine:
         self.timeout = timeout
         
         _initialize_playwright_globals()
-        
         self.sessions = requests.Session()
         default_headers = {
             "User-Agent": "SQLiSense-DAST/1.0"
@@ -52,9 +50,9 @@ class HttpRequestEngine:
             return None
             
         try:
-            _page.goto(url, timeout=self.timeout * 1000)
+            _page.goto(url, timeout=self.timeout * 1000, wait_until="domcontentloaded")
             
-            _page.wait_for_load_state("networkidle")
+            _page.wait_for_timeout(3000)
 
             rendered_html = _page.content()
             return rendered_html

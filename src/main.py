@@ -9,13 +9,13 @@ def main():
     """
 
 
-    target_url = "https://juice-shop.herokuapp.com/#/login"
+    target_url = "https://ustep.ustp.edu.ph/login/index.php"
 
     print("== SQLiSense ==")
     print(f"Target: {target_url}")
 
     engine = HttpRequestEngine(
-        timeout=10,
+        timeout=30, 
         headers={
             "User-Agent": "SQLiSense-DAST/1.0"
         }
